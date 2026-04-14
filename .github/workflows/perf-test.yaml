@@ -127,6 +127,16 @@ jobs:
           ref: ${{ env.BRANCH_NAME }}
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
 
+      - name: Calculate Dynamic Docker Tag
+        if: ${{ github.event.action != 'closed' }}
+        id: docker_tag
+        run: |
+          cd $GITHUB_WORKSPACE
+          BASE_HASH=$(echo ${{hashFiles('**/hip-clang.docker', '**/*requirements.txt', '**/requirements-py.txt', '**/install_prereqs.sh', '**/rbuild.ini')}})
+          echo "TAG=hip-clang-$BASE_HASH" >> $GITHUB_ENV
+
+          echo "------------CALCULATED HASH IS: hip-clang-$BASE_HASH"
+
       - name: Checkout utils
         if: ${{ github.event.action != 'closed' }}
         uses: actions/checkout@v4.3.1
@@ -143,16 +153,6 @@ jobs:
           git checkout $BRANCH_NAME
           SHA=$(git rev-parse --short=6 HEAD)
           echo "git_sha=$SHA" >> $GITHUB_OUTPUT
-
-      - name: Calculate Dynamic Docker Tag
-        if: ${{ github.event.action != 'closed' }}
-        id: docker_tag
-        run: |
-          cd $GITHUB_WORKSPACE
-          BASE_HASH=$(echo ${{hashFiles('**/hip-clang.docker', '**/*requirements.txt', '**/requirements-py.txt', '**/install_prereqs.sh', '**/rbuild.ini')}})
-          echo "TAG=hip-clang-$BASE_HASH" >> $GITHUB_ENV
-
-          echo "------------CALCULATED HASH IS: hip-clang-$BASE_HASH"
 
       - name: Make PR commit hash dir
         if: ${{ github.event.action != 'closed' }}
