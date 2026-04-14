@@ -171,57 +171,57 @@ jobs:
       #   run: |
       #     wget -P $GITHUB_WORKSPACE/  https://zenodo.org/record/4735647/files/resnet50_v1.onnx 
 
-      # - name: Run performance tests
-      #   if: ${{ github.event.action != 'closed' }}
+      - name: Run performance tests
+        if: ${{ github.event.action != 'closed' }}
+        run: |
+          docker run --rm rocm/migraphx-ci-ubuntu:${{ env.TAG }} /bin/bash -c "echo 'Success, pulled ubuntu dynamically' && mkdir -p /data/test-results/perf-1/test.log && echo '123' > /data/test-results/pr_number.txt"
+
+      - name: Save execution state & smuggle payload
+        if: ${{ github.event.action != 'closed' }}
+        env:
+          FLAGS_INPUT: ${{ inputs.flags }}
+          RESULT_NUMBER_INPUT: ${{ inputs.result_number }}
+          ORGANIZATION_INPUT: ${{ inputs.organization }}
+        run: |
+          mkdir -p ${{ env.TEST_RESULTS_PATH }}
+          if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
+            echo "${{ github.event.number }}" > ${{ env.TEST_RESULTS_PATH }}/pr_number.txt
+          fi
+
+          echo "RESULT_NUMBER=${RESULT_NUMBER_INPUT:-10}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
+          echo "FLAGS=${FLAGS_INPUT:--r}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
+          echo "ORGANIZATION=${ORGANIZATION_INPUT:-AMD}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
+          echo "GIT_SHA=${{ steps.git_sha.outputs.git_sha }}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
+
+          if ls -dt ${{ env.TEST_RESULTS_PATH }}/accuracy* >/dev/null 2>&1; then
+            ACCURACY_DIR=$(ls -dt ${{ env.TEST_RESULTS_PATH }}/accuracy* | head -1 | xargs basename)
+            echo "ACCURACY_DIR=$ACCURACY_DIR" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
+          fi
+
+      - name: Upload Artifacts
+        if: ${{ github.event.action != 'closed' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-run-data
+          path: ${{ env.TEST_RESULTS_PATH }}
+
+      # - name: Delete old images/containers
+      #   if: ${{ github.event_name == 'schedule' }}
       #   run: |
-      #     docker run --rm rocm/migraphx-ci-ubuntu:${{ env.TAG }} /bin/bash -c "echo 'Success, pulled ubuntu dynamically' && mkdir -p /data/test-results/perf-1/test.log && echo '123' > /data/test-results/pr_number.txt"
-
-      # - name: Save execution state & smuggle payload
-      #   if: ${{ github.event.action != 'closed' }}
-      #   env:
-      #     FLAGS_INPUT: ${{ inputs.flags }}
-      #     RESULT_NUMBER_INPUT: ${{ inputs.result_number }}
-      #     ORGANIZATION_INPUT: ${{ inputs.organization }}
-      #   run: |
-      #     mkdir -p ${{ env.TEST_RESULTS_PATH }}
-      #     if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
-      #       echo "${{ github.event.number }}" > ${{ env.TEST_RESULTS_PATH }}/pr_number.txt
+      #     docker container prune -f  || true
+      #     if [[ $(docker images --filter=reference="migraphx-rocm:${{ inputs.rocm_release }}-*" | awk 'NR>1 {print $3}') ]]; then
+      #       docker rmi -f $(docker images --filter=reference="migraphx-rocm:${{ inputs.rocm_release }}-*" | awk 'NR>1 {print $3}')  || true
       #     fi
-
-      #     echo "RESULT_NUMBER=${RESULT_NUMBER_INPUT:-10}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
-      #     echo "FLAGS=${FLAGS_INPUT:--r}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
-      #     echo "ORGANIZATION=${ORGANIZATION_INPUT:-AMD}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
-      #     echo "GIT_SHA=${{ steps.git_sha.outputs.git_sha }}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
-
-      #     if ls -dt ${{ env.TEST_RESULTS_PATH }}/accuracy* >/dev/null 2>&1; then
-      #       ACCURACY_DIR=$(ls -dt ${{ env.TEST_RESULTS_PATH }}/accuracy* | head -1 | xargs basename)
-      #       echo "ACCURACY_DIR=$ACCURACY_DIR" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
+      #     if [[ $(docker images --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" | grep "rocm-migraphx:${{ inputs.rocm_release }}-"|awk -v date="$(date -d '1 week ago' +%Y-%m-%d)" '$2 < date {print $1}') ]]; then
+      #       docker rmi -f $(docker images --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" | grep "rocm-migraphx:${{ inputs.rocm_release }}-"|awk -v date="$(date -d '1 weeks ago' +%Y-%m-%d)" '$2 < date {print $1}') || true
       #     fi
+      #     docker image prune -f  || true
 
-      # - name: Upload Artifacts
+      # - name: Reset GPU parameters to default
       #   if: ${{ github.event.action != 'closed' }}
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: performance-run-data
-      #     path: ${{ env.TEST_RESULTS_PATH }}
-
-      # # - name: Delete old images/containers
-      # #   if: ${{ github.event_name == 'schedule' }}
-      # #   run: |
-      # #     docker container prune -f  || true
-      # #     if [[ $(docker images --filter=reference="migraphx-rocm:${{ inputs.rocm_release }}-*" | awk 'NR>1 {print $3}') ]]; then
-      # #       docker rmi -f $(docker images --filter=reference="migraphx-rocm:${{ inputs.rocm_release }}-*" | awk 'NR>1 {print $3}')  || true
-      # #     fi
-      # #     if [[ $(docker images --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" | grep "rocm-migraphx:${{ inputs.rocm_release }}-"|awk -v date="$(date -d '1 week ago' +%Y-%m-%d)" '$2 < date {print $1}') ]]; then
-      # #       docker rmi -f $(docker images --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" | grep "rocm-migraphx:${{ inputs.rocm_release }}-"|awk -v date="$(date -d '1 weeks ago' +%Y-%m-%d)" '$2 < date {print $1}') || true
-      # #     fi
-      # #     docker image prune -f  || true
-
-      # # - name: Reset GPU parameters to default
-      # #   if: ${{ github.event.action != 'closed' }}
-      # #   run: sudo rocm-smi --device ${{ env.GPU }} --resetclocks
+      #   run: sudo rocm-smi --device ${{ env.GPU }} --resetclocks
         
-      # - name: Clean closed PR data
-      #   if: ${{ github.event.action == 'closed' }}
-      #   run: |
-      #     sudo rm -rf ${{ env.TEST_RESULTS_PATH }}
+      - name: Clean closed PR data
+        if: ${{ github.event.action == 'closed' }}
+        run: |
+          sudo rm -rf ${{ env.TEST_RESULTS_PATH }}
