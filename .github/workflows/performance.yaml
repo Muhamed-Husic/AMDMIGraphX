@@ -16,11 +16,11 @@ on:
       performance_reports_repo:
         description: Repository where performance reports are stored
         required: true
-        default: 'ROCm/migraphx-reports'
+        default: 'Muhamed-Husic/mock-migraphx'
       benchmark_utils_repo:
         description: Repository where benchmark utils are stored
         required: true
-        default: "ROCm/migraphx-benchmark-utils"
+        default: "Muhamed-Husic/mock-migraphx"
       organization:
         description: Organization based on which location of files will be different
         required: true
@@ -134,7 +134,7 @@ jobs:
 
   call_reusable:
     needs: get_config
-    uses: ROCm/migraphx-benchmark/.github/workflows/perf-test.yml@testing
+    uses: Muhamed-Husic/mock-migraphx/.github/workflows/perf-test.yaml@develop
     with:
       rocm_release: ${{ github.event.inputs.rocm_release || needs.get_config.outputs.rocm_version }}
       benchmark_utils_repo: ${{ github.event.inputs.benchmark_utils_repo || needs.get_config.outputs.utils_repo }}

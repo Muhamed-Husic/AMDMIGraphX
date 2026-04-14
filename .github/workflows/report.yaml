@@ -7,9 +7,15 @@ on:
 env:
   REPORTS_DIR: migraphx-reports
   MAIL_TO: dl.dl-migraphx-perfrun@amd.com
+  MAIL_CC: igor.mirosavljevic@htecgroup.com
   MAIL_BODY: Scheduled Performance test run on develop branch
   PERFORMANCE_DIR: performance-backup
   REPORTS_PATH: temp_reports
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
 
 jobs:
   post-report:
@@ -23,7 +29,7 @@ jobs:
         with:
           name: performance-run-data
           path: test-results
-          github-token: ${{ secrets.MIGRAPHX_BOT_TOKEN }}
+          github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
 
       - name: Extract context safely
@@ -63,13 +69,30 @@ jobs:
             else
               echo "ORGANIZATION=AMD" >> $GITHUB_ENV
             fi
-          fi      
+          fi
+          echo "PR NUMBER: $PR_NUMBER"
+          echo "RESULT NUMBER: $RESULT_NUMBER"
+          echo "FLAGS: $FLAGS"
+          echo "ACCURACY_DIR: $ACCURACY_DIR"
+          echo "GIT_SHA: $GIT_SHA"
+          echo "ORGANIZATION: $ORGANIZATION"
+
+      - name: Update Mailing list based on organization
+        if: steps.dl_art.outcome == 'success'
+        run: |
+          if [ "${{ env.ORGANIZATION }}" == "HTEC" ]; then
+            echo "MAIL_TO=igor.mirosavljevic@htecgroup.com" >> $GITHUB_ENV
+            echo "MAIL_CC=" >> $GITHUB_ENV
+          else
+            echo "MAIL_TO=dl.dl-migraphx-perfrun@amd.com" >> $GITHUB_ENV
+            echo "MAIL_CC=igor.mirosavljevic@htecgroup.com" >> $GITHUB_ENV
+          fi        
         
       - name: Checkout report's repo
         if: steps.dl_art.outcome == 'success'
         uses: actions/checkout@v4.3.1
         with:
-          repository: ROCm/${{ env.REPORTS_DIR }}
+          repository: Muhamed-Husic/mock-migraphx
           path: ${{ env.REPORTS_DIR }}
           token: ${{ secrets.MIGRAPHX_BOT_TOKEN }}
       
@@ -77,13 +100,13 @@ jobs:
         if: steps.dl_art.outcome == 'success'
         uses: actions/checkout@v4.3.1
         with:
-          repository: ROCm/migraphx-benchmark-utils
+          repository: Muhamed-Husic/mock-migraphx
           path: benchmark-utils
           token: ${{ secrets.MIGRAPHX_BOT_TOKEN }}
 
-      - name: Setup Python
+      - name: Setup Python environment
         if: steps.dl_art.outcome == 'success'
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -91,14 +114,14 @@ jobs:
         if: steps.dl_art.outcome == 'success'
         run: pip install tabulate==0.8.9 pandas==1.4.2 numpy==1.22.3 openpyxl==3.1.2
 
-      - name: Execute report script
-        if: steps.dl_art.outcome == 'success' && github.event.workflow_run.event == 'schedule'
-        run: |
-          mkdir -p ${{ env.REPORTS_PATH }}
-          python3 benchmark-utils/scripts/report.py -t 'test-results' -r ${{ env.REPORTS_PATH }}
-          python3 benchmark-utils/scripts/history.py -n -t 'test-results' -r ${{ env.REPORTS_PATH }}
-          mkdir -p ${{ env.REPORTS_DIR }}/nightly_reports
-          cp -r ${{ env.REPORTS_PATH }}/results-* ${{ env.REPORTS_DIR }}/nightly_reports/ || true
+      # - name: Execute report script
+      #   if: steps.dl_art.outcome == 'success' && github.event.workflow_run.event == 'schedule'
+        # run: |
+        #   mkdir -p ${{ env.REPORTS_PATH }}
+        #   python3 benchmark-utils/scripts/report.py -t 'test-results' -r ${{ env.REPORTS_PATH }}
+        #   python3 benchmark-utils/scripts/history.py -n -t 'test-results' -r ${{ env.REPORTS_PATH }}
+        #   mkdir -p ${{ env.REPORTS_DIR }}/nightly_reports
+        #   cp -r ${{ env.REPORTS_PATH }}/results-* ${{ env.REPORTS_DIR }}/nightly_reports/ || true
 
       - name: Copy performance results to repo - PRs
         if: steps.dl_art.outcome == 'success' && github.event.workflow_run.event != 'schedule' && env.PR_NUMBER && env.PR_NUMBER != ''
@@ -131,15 +154,15 @@ jobs:
           git commit -m "Performance results run https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" -a || true
           git push
 
-      - name: Execute comment script
-        if: steps.dl_art.outcome == 'success' && env.PR_NUMBER && env.PR_NUMBER != ''
-        run: |
-          if [ "${{ env.FLAGS }}" == "-r" ]; then
-            flagoptions="-r benchmark-utils/scripts/"
-          else
-            flagoptions="${{ env.FLAGS }}"
-          fi
-          python3 benchmark-utils/scripts/comment.py -t 'test-results' -n "${{ env.RESULT_NUMBER }}" $flagoptions -p
+      # - name: Execute comment script
+      #   if: steps.dl_art.outcome == 'success' && env.PR_NUMBER && env.PR_NUMBER != ''
+        # run: |
+        #   if [ ${{ env.FLAGS }} == "-r" ]; then
+        #     flagoptions="-r benchmark-utils/scripts/"
+        #   else
+        #     flagoptions="${{ env.FLAGS }}"
+        #   fi
+        #   python3 benchmark-utils/scripts/comment.py -t 'test-results' -n "${{ env.RESULT_NUMBER }}" $flagoptions -p
 
       - name: Create a comment on PR
         if: steps.dl_art.outcome == 'success' && env.PR_NUMBER && env.PR_NUMBER != ''
@@ -165,7 +188,7 @@ jobs:
         if: steps.dl_art.outcome == 'success' && github.event.workflow_run.event == 'schedule'
         uses: actions/checkout@v4.3.1
         with:
-          repository: migraphx-benchmark/${{ env.PERFORMANCE_DIR }}
+          repository: Muhamed-Husic/mock-migraphx
           path: ${{ env.PERFORMANCE_DIR }}
           token: ${{ secrets.MIGRAPHX_BOT_TOKEN }}
 
@@ -204,6 +227,7 @@ jobs:
           from: "GH Actions"
           secure: true
           body: ${{ env.MAIL_BODY }}
+          cc: ${{ env.MAIL_CC }}
           ignore_cert: true
           attachments: ${{ steps.last_report.outputs.latest}}
           priority: normal
