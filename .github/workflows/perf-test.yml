@@ -124,7 +124,7 @@ jobs:
         uses: actions/checkout@v4.3.1
         with:
           fetch-depth: 0
-          ref: ${{ env.BRANCH_NAME }}
+          ref: ${{ github.ref_name }}
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
 
       - name: Calculate Dynamic Docker Tag
