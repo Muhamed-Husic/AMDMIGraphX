@@ -119,6 +119,14 @@ jobs:
           echo "BRANCH_NAME=$sanitized_branch_name" >> $GITHUB_ENV
           echo "TEST_RESULTS_PATH=$(echo "$TEST_RESULTS_PATH-$PR_ID")" >> $GITHUB_ENV
 
+      - name: Checkout code
+        if: ${{ github.event.action != 'closed' }}
+        uses: actions/checkout@v4.3.1
+        with:
+          fetch-depth: 0
+          ref: ${{ env.BRANCH_NAME }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+
       - name: Calculate Dynamic Docker Tag
         if: ${{ github.event.action != 'closed' }}
         id: docker_tag
@@ -128,14 +136,6 @@ jobs:
           echo "TAG=hip-clang-$BASE_HASH" >> $GITHUB_ENV
 
           echo "------------CALCULATED HASH IS: hip-clang-$BASE_HASH"
-
-      - name: Checkout code
-        if: ${{ github.event.action != 'closed' }}
-        uses: actions/checkout@v4.3.1
-        with:
-          fetch-depth: 0
-          ref: ${{ env.BRANCH_NAME }}
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
 
       - name: Checkout utils
         if: ${{ github.event.action != 'closed' }}
