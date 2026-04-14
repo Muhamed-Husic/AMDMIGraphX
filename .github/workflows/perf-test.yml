@@ -176,27 +176,27 @@ jobs:
         run: |
           docker run --rm rocm/migraphx-ci-ubuntu:${{ env.TAG }} /bin/bash -c "echo 'Success, pulled ubuntu dynamically' && mkdir -p /data/test-results/perf-1/test.log && echo '123' > /data/test-results/pr_number.txt"
 
-      - name: Save execution state & smuggle payload
-        if: ${{ github.event.action != 'closed' }}
-        env:
-          FLAGS_INPUT: ${{ inputs.flags }}
-          RESULT_NUMBER_INPUT: ${{ inputs.result_number }}
-          ORGANIZATION_INPUT: ${{ inputs.organization }}
-        run: |
-          mkdir -p ${{ env.TEST_RESULTS_PATH }}
-          if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
-            echo "${{ github.event.number }}" > ${{ env.TEST_RESULTS_PATH }}/pr_number.txt
-          fi
+      # - name: Save execution state & smuggle payload
+      #   if: ${{ github.event.action != 'closed' }}
+      #   env:
+      #     FLAGS_INPUT: ${{ inputs.flags }}
+      #     RESULT_NUMBER_INPUT: ${{ inputs.result_number }}
+      #     ORGANIZATION_INPUT: ${{ inputs.organization }}
+      #   run: |
+      #     mkdir -p ${{ env.TEST_RESULTS_PATH }}
+      #     if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
+      #       echo "${{ github.event.number }}" > ${{ env.TEST_RESULTS_PATH }}/pr_number.txt
+      #     fi
 
-          echo "RESULT_NUMBER=${RESULT_NUMBER_INPUT:-10}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
-          echo "FLAGS=${FLAGS_INPUT:--r}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
-          echo "ORGANIZATION=${ORGANIZATION_INPUT:-AMD}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
-          echo "GIT_SHA=${{ steps.git_sha.outputs.git_sha }}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
+      #     echo "RESULT_NUMBER=${RESULT_NUMBER_INPUT:-10}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
+      #     echo "FLAGS=${FLAGS_INPUT:--r}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
+      #     echo "ORGANIZATION=${ORGANIZATION_INPUT:-AMD}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
+      #     echo "GIT_SHA=${{ steps.git_sha.outputs.git_sha }}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
 
-          if ls -dt ${{ env.TEST_RESULTS_PATH }}/accuracy* >/dev/null 2>&1; then
-            ACCURACY_DIR=$(ls -dt ${{ env.TEST_RESULTS_PATH }}/accuracy* | head -1 | xargs basename)
-            echo "ACCURACY_DIR=$ACCURACY_DIR" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
-          fi
+      #     if ls -dt ${{ env.TEST_RESULTS_PATH }}/accuracy* >/dev/null 2>&1; then
+      #       ACCURACY_DIR=$(ls -dt ${{ env.TEST_RESULTS_PATH }}/accuracy* | head -1 | xargs basename)
+      #       echo "ACCURACY_DIR=$ACCURACY_DIR" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
+      #     fi
 
       - name: Upload Artifacts
         if: ${{ github.event.action != 'closed' }}
