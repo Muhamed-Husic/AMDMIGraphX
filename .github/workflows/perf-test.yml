@@ -55,40 +55,121 @@ on:
 env:
   UTILS_DIR: benchmark-utils
   DOCKERBASE: rocm-migraphx:${{ inputs.rocm_release }}
-  MIOPENTUNE: miopen-dbs/rocm${{ inputs.rocm_release }}
   PR_ID: ${{ github.event.number }}
   BRANCH_NAME: develop
   TEST_RESULTS_PATH: ${{ inputs.perf_workspace }}/${{ inputs.organization }}/test-results
-  MIGRAPHX_PATH: ${{ inputs.perf_workspace }}/migraphx/${{ inputs.organization }}
 
 jobs:
-  performance_test:
+  build_product:
+    name: Build MIGraphX
+    runs-on: ubuntu-24.04
+    outputs:
+      image_tag: ${{ steps.image_hash.outputs.imagetag }}
+    steps:
+      - name: Update PR env
+        if: ${{ github.event_name == 'pull_request_target' || github.event_name == 'schedule'}}
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [ -z "$PR_ID" ]; then
+            PR_ID="develop"
+          fi
+          sanitized_branch_name=$(echo "$HEAD_REF" | sed 's/[^a-zA-Z0-9._\/]/-/g')
+          echo "BRANCH_NAME=$sanitized_branch_name" >> $GITHUB_ENV
+          echo "TEST_RESULTS_PATH=$(echo "$TEST_RESULTS_PATH-$PR_ID")" >> $GITHUB_ENV
+
+      - name: Checkout code
+        if: ${{ github.event.action != 'closed' }}
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ env.BRANCH_NAME }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+
+      - name: Free space and setup swap
+        if: ${{ github.event.action != 'closed' }}
+        uses: jlumbroso/free-disk-space@main
+        continue-on-error: true
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+          docker-images: true
+
+      - name: Create Image Tag
+        id: image_hash
+        run: |
+          # echo "imagetag=hip-clang-${{hashFiles('**/hip-clang.docker', '**/*requirements.txt', '**/requirements-py.txt', '**/install_prereqs.sh', '**/rbuild.ini')}}" >> $GITHUB_OUTPUT
+          echo "imagetag="hip-clang-1fd504c89985eaea3e03e3756304c375ad8af66324e1e1b7a1735643a879b155" >> $GITHUB_OUTPUT
+
+      - name: Wait for CI docker image
+        if: ${{ github.event.action != 'closed' }}
+        run: |
+          # TAG="${{ steps.image_hash.outputs.imagetag }}"
+          TAG="hip-clang-1fd504c89985eaea3e03e3756304c375ad8af66324e1e1b7a1735643a879b155"
+          echo "Polling DockerHub for rocm/migraphx-ci-ubuntu:$TAG"
+          for i in {1..40}; do
+            if docker manifest inspect rocm/migraphx-ci-ubuntu:$TAG > /dev/null 2>&1; then
+              echo "Docker image is available."
+              exit 0
+            else
+              echo "Waiting 60 sec... Attempt $i/40"
+              sleep 60
+            fi
+          done
+          echo "TImeout, waiting for CI to build docker image."
+          exit 1
+
+      - name: Build and Package
+        run: |
+          docker run --rm -v $GITHUB_WORKSPACE:/data -w /data rocm/migraphx-ci-ubuntu:${{ steps.image_hash.outputs.imagetag }} /bin/bash -c "mkdir build && cd build && CXX=/opt/rocm/llvm/bin/clang++ CC=/opt/rocm/llvm/bin/clang cmake -DCMAKE_BUILD_TYPE=Release .. && make package -j\$(nproc) "
+      
+      - name: Upload package
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: migraphx-deb
+          path: build/*.deb
+
+  test_product:
     name: MIGraphX Performance
-    runs-on: [ubuntu-latest]
+    runs-on: ubuntu-latest # ["${{ inputs.runs_on }}"]
+    needs: build_product
     outputs:
       git_sha: ${{ steps.git_sha.outputs.git_sha }}
     steps:
-      # - name: Clean up canceled runs
-      #   continue-on-error: true
-      #   run: |
-      #     wf_id=$(curl -H "Authorization: Bearer ${{ github.token }}" \
-      #     ${{ github.api_url }}/repos/${{ github.repository }}/actions/workflows \
-      #     | jq -r '.workflows[] | {id, name}| select(.name == "${{ github.workflow }}") | .id')
-      #     cancel_id=$(curl -H "Authorization: Bearer ${{ github.token }}" \
-      #     ${{ github.api_url }}/repos/${{ github.repository }}/actions/workflows/$wf_id/runs?per_page=10 \
-      #     | jq -r '.workflow_runs[] | {id, run_number, conclusion} | select(.conclusion == "cancelled") | {id, run_number}' \
-      #     | jq -s '.[0].id' || true)
-      #     docker stop perf-test-$cancel_id || true
-      #     cancel_id=$(curl -H "Authorization: Bearer ${{ github.token }}" \
-      #     ${{ github.api_url }}/repos/${{ github.repository }}/actions/workflows/$wf_id/runs?per_page=10 \
-      #     | jq -r '.workflow_runs[] | {id, run_number, conclusion} | select(.conclusion == "cancelled") | {id, run_number}' \
-      #     | jq -s '.[1].id' || true)
-      #     docker stop perf-test-$cancel_id || true
-      #     cancel_id=$(curl -H "Authorization: Bearer ${{ github.token }}" \
-      #     ${{ github.api_url }}/repos/${{ github.repository }}/actions/workflows/$wf_id/runs?per_page=10 \
-      #     | jq -r '.workflow_runs[] | {id, run_number, conclusion} | select(.conclusion == "cancelled") | {id, run_number}' \
-      #     | jq -s '.[2].id' || true)
-      #     docker stop perf-test-$cancel_id || true
+      - name: Verify PR trust level
+        if: ${{ github.event_name == 'pull_request_target' }}
+        env:
+          IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          if [[ "$IS_FORK" != "true" ]]; then
+            echo "Same-repo PR, proceeding."
+            exit 0
+          fi
+          HAS_LABEL=$(curl -sH "Authorization: Bearer ${{ github.token }}" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/issues/$PR_NUMBER/labels" \
+            | jq -r '.[].name' | grep -c '^ok-to-test$' || true)
+          if [[ "$HAS_LABEL" -eq 0 ]]; then
+            echo "::error::Fork PRs require the 'ok-to-test' label from a maintainer."
+            exit 1
+          fi
+
+      - name: Clean up canceled runs
+        continue-on-error: true
+        run: |
+          wf_id=$(curl -sH "Authorization: Bearer ${{ github.token }}" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/actions/workflows" \
+            | jq -r '.workflows[] | select(.name == "${{ github.workflow }}") | .id')
+
+          curl -sH "Authorization: Bearer ${{ github.token }}" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/actions/workflows/$wf_id/runs?per_page=10" \
+            | jq -r '.workflow_runs[] | select(.conclusion == "cancelled") | .id' \
+            | head -3 \
+            | while read -r cid; do docker stop "perf-test-$cid" || true; done
 
       # - name: Get runner ID
       #   run: |
@@ -96,6 +177,7 @@ jobs:
       #       "${{ inputs.runs_on }}"* | "linux-migraphx-mi250-1"*)
       #         GPU=0
       #         CPU="0-31"
+      #         MODEL_PATH="/migraphx-models/models"
       #         ;;
       #       *)
       #         echo "Unknown RUNNER_ID: $RUNNER_NAME"
@@ -106,53 +188,37 @@ jobs:
       #     export CPU
       #     echo "GPU=$GPU" >> $GITHUB_ENV
       #     echo "CPU=$CPU" >> $GITHUB_ENV
-      
+      #     echo "MODEL_PATH=$MODEL_PATH" >> $GITHUB_ENV
+
       # - name: Set GPU parameters
       #   if: ${{ github.event.action != 'closed' }}
       #   run:
       #     sudo rocm-smi --device ${{ env.GPU }} --setsrange 700 800 --autorespond y
 
-      - name: Update PR env
-        if: ${{ github.event_name == 'pull_request_target'}}
-        run: |
-          sanitized_branch_name=$(echo "${{ github.head_ref }}" | sed 's/[^a-zA-Z0-9._\/]/-/g')
-          echo "BRANCH_NAME=$sanitized_branch_name" >> $GITHUB_ENV
-          echo "TEST_RESULTS_PATH=$(echo "$TEST_RESULTS_PATH-$PR_ID")" >> $GITHUB_ENV
-
       - name: Checkout code
         if: ${{ github.event.action != 'closed' }}
-        uses: actions/checkout@v4.3.1
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: ${{ github.ref_name }}
+          ref: ${{ env.BRANCH_NAME }}
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
 
-      - name: Calculate Dynamic Docker Tag
-        if: ${{ github.event.action != 'closed' }}
-        id: docker_tag
-        run: |
-          cd $GITHUB_WORKSPACE
-          BASE_HASH=$(echo ${{hashFiles('**/hip-clang.docker', '**/*requirements.txt', '**/requirements-py.txt', '**/install_prereqs.sh', '**/rbuild.ini')}})
-          echo "TAG=hip-clang-$BASE_HASH" >> $GITHUB_ENV
+      # - name: Checkout utils
+      #   if: ${{ github.event.action != 'closed' }}
+      #   uses: actions/checkout@v6
+      #   with:
+      #     repository: ${{ inputs.benchmark_utils_repo }}
+      #     path: ${{ env.UTILS_DIR }}
+      #     ssh-key: ${{ secrets.BENCHMARK_UTILS_READ_TOKEN }}
 
-          echo "------------CALCULATED HASH IS: hip-clang-$BASE_HASH"
-
-      - name: Checkout utils
-        if: ${{ github.event.action != 'closed' }}
-        uses: actions/checkout@v4.3.1
-        with:
-          repository: Muhamed-Husic/mock-migraphx
-          path: ${{ env.UTILS_DIR }}
-          # token: ${{ secrets.BENCHMARK_UTILS_READ_TOKEN }}
-
-      - name: Get git SHA
-        if: ${{ github.event.action != 'closed' }}
-        id: git_sha
-        run: |
-          cd $GITHUB_WORKSPACE
-          git checkout $BRANCH_NAME
-          SHA=$(git rev-parse --short=6 HEAD)
-          echo "git_sha=$SHA" >> $GITHUB_OUTPUT
+      # - name: Get git SHA
+      #   if: ${{ github.event.action != 'closed' }}
+      #   id: git_sha
+      #   run: |
+      #     cd $GITHUB_WORKSPACE
+      #     git checkout $BRANCH_NAME
+      #     SHA=$(git rev-parse --short=6 HEAD)
+      #     echo "git_sha=$SHA" >> $GITHUB_OUTPUT
 
       # - name: Make PR commit hash dir
       #   if: ${{ github.event.action != 'closed' }}
@@ -163,44 +229,87 @@ jobs:
       # - name: Little debug
       #   if: ${{ github.event.action != 'closed' }}
       #   run: |
-      #     echo "results_path=${{ env.TEST_RESULTS_PATH }}" >> $GITHUB_OUTPUT
-      #     find ${{ env.TEST_RESULTS_PATH }} -maxdepth 2 -type d | xargs ls -la ||true
+      #     echo "results_path=${{ env.TEST_RESULTS_PATH }}"
+      #     echo "model_path=${{ env.MODEL_PATH }}" 
+      #     ls -l ${{ env.MODEL_PATH }} || true
+      #     echo "/migraphx-models"
+      #     ls -l /migraphx-models ||true
+      #     echo "What is inside /migraphx-models"
+      #     find /migraphx-models -maxdepth 1 -type d | xargs ls -la || true
+      #     echo "What is inside ${{ env.TEST_RESULTS_PATH }}"
+      #     find ${{ env.TEST_RESULTS_PATH }} -maxdepth 2 -type d | xargs ls -la || true
+      #     echo "Show results of df -h"
+      #     df -h || true
+      #     mount || true
 
-      # - name: Download Resnet50
-      #   if: ${{ github.event.action != 'closed' }}
-      #   run: |
-      #     wget -P $GITHUB_WORKSPACE/  https://zenodo.org/record/4735647/files/resnet50_v1.onnx 
-
-      - name: Run performance tests
+      - name: Download MIGraphX Deb Artifact
         if: ${{ github.event.action != 'closed' }}
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: migraphx-deb
+          path: ${{ github.workspace }}/deb-package
+
+      - name: Verifz artifact passing
         run: |
-          docker run --rm rocm/migraphx-ci-ubuntu:${{ env.TAG }} /bin/bash -c "echo 'Success, pulled ubuntu dynamically' && mkdir -p /data/test-results/perf-1/test.log && echo '123' > /data/test-results/pr_number.txt"
+          echo "Did artifacts download correctly?"
+          ls -la ${{ github.workspace }}/deb-package
 
-      # - name: Save execution state & smuggle payload
+          echo "Package metadata:"
+          dpkg-deb --info ${{ github.workspace }}/deb-package/*.deb || echo "No deb files found!"
+
+          echo "Confirming the migraphx-driver compile structure:"
+          dpkg-deb --contents ${{ github.workspace }}/deb-package/*.deb | grep "/opt/rocm/bin/" || echo "migraphx-driver not found in deb package!"
+
+      # - name: Run performance tests
       #   if: ${{ github.event.action != 'closed' }}
-      #   env:
-      #     FLAGS_INPUT: ${{ inputs.flags }}
-      #     RESULT_NUMBER_INPUT: ${{ inputs.result_number }}
-      #     ORGANIZATION_INPUT: ${{ inputs.organization }}
-      #   run: |
-      #     mkdir -p ${{ env.TEST_RESULTS_PATH }}
-      #     if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
-      #       echo "${{ github.event.number }}" > ${{ env.TEST_RESULTS_PATH }}/pr_number.txt
-      #     fi
+      #   run: >
+      #     docker run
+      #     --name perf-test-$GITHUB_RUN_ID
+      #     --cpuset-cpus=${{ env.CPU }}
+      #     -e ROCR_VISIBLE_DEVICES=${{ env.GPU }}
+      #     -e TZ=America/Chicago
+      #     -e TARGET=gpu
+      #     -e PYTHONPATH=/src/AMDMIGraphX/build/lib
+      #     -e USE_RBUILD=1
+      #     --device=/dev/dri
+      #     --device=/dev/kfd
+      #     --network=host
+      #     --group-add=video
+      #     -v ${{ env.MODEL_PATH }}:/models:ro
+      #     -v $GITHUB_WORKSPACE/${{ env.UTILS_DIR }}/scripts:/migraphx/sh:ro
+      #     -v ${{ env.TEST_RESULTS_PATH }}/:/data/test-results
+      #     -v $GITHUB_WORKSPACE/:/src/AMDMIGraphX:rw
+      #     --workdir /migraphx/sh
+      #     rocm/migraphx-ci-ubuntu:${{ needs.build_product.outputs.image_tag }} /bin/bash -c "apt-get update && apt-get install -y /src/AMDMIGraphX/deb-package/*.deb && DRIVER=/opt/rocm/bin/migraphx-driver ./performance_tests.sh ${{ inputs.model_timeout }}"
 
-      #     echo "RESULT_NUMBER=${RESULT_NUMBER_INPUT:-10}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
-      #     echo "FLAGS=${FLAGS_INPUT:--r}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
-      #     echo "ORGANIZATION=${ORGANIZATION_INPUT:-AMD}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
-      #     echo "GIT_SHA=${{ steps.git_sha.outputs.git_sha }}" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
+      - name: Save execution metadata
+        if: ${{ github.event.action != 'closed' }}
+        env:
+          FLAGS_INPUT: ${{ inputs.flags }}
+          RESULT_NUMBER_INPUT: ${{ inputs.result_number }}
+          ORGANIZATION_INPUT: ${{ inputs.organization }}
+          EVENT_NUMBER: ${{ github.event.number }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request_target" ]]; then
+            docker run --rm -v ${{ env.TEST_RESULTS_PATH }}/:/data alpine sh -c "echo $EVENT_NUMBER > /data/pr_number.txt"
+          fi
 
-      #     if ls -dt ${{ env.TEST_RESULTS_PATH }}/accuracy* >/dev/null 2>&1; then
-      #       ACCURACY_DIR=$(ls -dt ${{ env.TEST_RESULTS_PATH }}/accuracy* | head -1 | xargs basename)
-      #       echo "ACCURACY_DIR=$ACCURACY_DIR" >> ${{ env.TEST_RESULTS_PATH }}/env_vars.env
-      #     fi
+          echo "RESULT_NUMBER=${RESULT_NUMBER_INPUT:-10}" >> env_vars.env
+          echo "FLAGS=${FLAGS_INPUT:--r}" >> env_vars.env
+          echo "ORGANIZATION=${ORGANIZATION_INPUT:-AMD}" >> env_vars.env
+          echo "GIT_SHA=${{ steps.git_sha.outputs.git_sha }}" >> env_vars.env
+
+          if ls -dt ${{ env.TEST_RESULTS_PATH }}/accuracy* >/dev/null 2>&1; then
+            ACCURACY_DIR=$(ls -dt ${{ env.TEST_RESULTS_PATH }}/accuracy* | head -1 | xargs basename)
+            echo "ACCURACY_DIR=$ACCURACY_DIR" >> env_vars.env
+          fi
+
+          docker run --rm -v ${{ env.TEST_RESULTS_PATH }}/:/data -v ./:/src alpine cp -r /src/env_vars.env /data
 
       - name: Upload Artifacts
         if: ${{ github.event.action != 'closed' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: performance-run-data
           path: ${{ env.TEST_RESULTS_PATH }}
@@ -218,9 +327,9 @@ jobs:
       #     docker image prune -f  || true
 
       # - name: Reset GPU parameters to default
-      #   if: ${{ github.event.action != 'closed' }}
+      #   if: ${{ always() && github.event.action != 'closed' }}
       #   run: sudo rocm-smi --device ${{ env.GPU }} --resetclocks
-        
+
       - name: Clean closed PR data
         if: ${{ github.event.action == 'closed' }}
         run: |
