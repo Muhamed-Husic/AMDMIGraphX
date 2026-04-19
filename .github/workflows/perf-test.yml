@@ -102,9 +102,7 @@ jobs:
       - name: Create Image Tag
         id: image_hash
         run: |
-          # echo "imagetag=hip-clang-${{hashFiles('**/hip-clang.docker', '**/*requirements.txt', '**/requirements-py.txt', '**/install_prereqs.sh', '**/rbuild.ini')}}" >> $GITHUB_OUTPUT
-          echo "imagetag="hip-clang-1fd504c89985eaea3e03e3756304c375ad8af66324e1e1b7a1735643a879b155" >> $GITHUB_OUTPUT
-
+          echo "imagetag=hip-clang-${{hashFiles('**/hip-clang.docker', '**/*requirements.txt', '**/requirements-py.txt', '**/install_prereqs.sh', '**/rbuild.ini')}}" >> $GITHUB_OUTPUT
       - name: Wait for CI docker image
         if: ${{ github.event.action != 'closed' }}
         run: |
