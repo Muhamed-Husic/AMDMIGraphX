@@ -252,12 +252,12 @@ jobs:
           echo "Did artifacts download correctly?"
           ls -la ${{ github.workspace }}/deb-package
 
-          echo "Package metadata:"
-          dpkg-deb --info ${{ github.workspace }}/deb-package/*.deb || echo "No deb files found!"
-
-          echo "Confirming the migraphx-driver compile structure:"
-          dpkg-deb --contents ${{ github.workspace }}/deb-package/*.deb | grep "/opt/rocm/bin/" || echo "migraphx-driver not found in deb package!"
-
+          for DEB in ${{ github.workspace }}/deb-package/*.deb; do
+            echo "Inspecting $DEB"
+            dpkg-deb --info "$DEB" || echo "Failed to read deb info for $DEB"
+            dpkg-deb --contents "$DEB" | grep "/opt/rocm/bin/" || echo "Failed to read deb contents for $DEB"
+          done
+          
       # - name: Run performance tests
       #   if: ${{ github.event.action != 'closed' }}
       #   run: >
