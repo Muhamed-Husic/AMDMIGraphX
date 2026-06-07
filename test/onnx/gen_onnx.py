@@ -6653,6 +6653,25 @@ def hardmax_axis_neg_test():
 
 
 @onnx_test()
+def mean_variance_normalization_default_test():
+    x = helper.make_tensor_value_info('x', TensorProto.FLOAT, [1, 3, 4, 5])
+    y = helper.make_tensor_value_info('y', TensorProto.FLOAT, [1, 3, 4, 5])
+
+    node = onnx.helper.make_node('MeanVarianceNormalization', inputs=['x'], outputs=['y'])
+
+    return ([node], [x], [y])
+
+
+@onnx_test()
+def mean_variance_normalization_axes_test():
+    x = helper.make_tensor_value_info('x', TensorProto.FLOAT, [1, 3, 4, 5])
+    y = helper.make_tensor_value_info('y', TensorProto.FLOAT, [1, 3, 4, 5])
+
+    node = onnx.helper.make_node('MeanVarianceNormalization', inputs=['x'], outputs=['y'], axes=[0, 2, 3])
+
+    return ([node], [x], [y])
+
+@onnx_test()
 def hardsigmoid_default_test():
     x = helper.make_tensor_value_info('x', TensorProto.FLOAT, [1, 3, 4, 5])
     y = helper.make_tensor_value_info('y', TensorProto.FLOAT, [1, 3, 4, 5])
